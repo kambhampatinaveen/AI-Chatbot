@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Chatbot</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/lucide@latest"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <button id="newChatBtn" class="new-chat-btn" type="button">
+            <i data-lucide="plus"></i> New chat
+          </button>
+          <button class="theme-toggle" type="button" aria-label="Theme">
+            <i data-lucide="sun" id="themeIcon"></i>
+          </button>
+        </div>
+
+        <div class="search-box">
+          <input type="text" id="searchChats" placeholder="Search chats..." />
+        </div>
+
+        <div class="chat-list-container">
+          <div id="pinnedSection" class="chat-section">
+            <div class="section-label">PINNED</div>
+            <div id="pinnedList" class="chat-items"></div>
+          </div>
+          <div id="thisWeekSection" class="chat-section">
+            <div class="section-label">THIS WEEK</div>
+            <div id="thisWeekList" class="chat-items"></div>
+          </div>
+          <div id="olderSection" class="chat-section">
+            <div class="section-label">OLDER</div>
+            <div id="olderList" class="chat-items"></div>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="account-item">
+            <div class="avatar"><i data-lucide="user"></i></div>
+            <div>My Account</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="chat-panel">
+        <header class="chat-header">
+          <div class="header-left">
+            <div class="model-info">
+              <div class="model-avatar">AI</div>
+              <div>
+                <h2>AI CHATBOT</h2>
+              </div>
+            </div>
+          </div>
+          <div class="header-right">
+            <span class="message-count" id="messageCount">0 messages</span>
+          </div>
+        </header>
+        
+        <section id="chatLog" class="chat-log"></section>
+
+        <form id="chatForm" class="composer">
+          <div class="input-container">
+            <button type="button" class="persona-toggle-btn" id="personaToggleBtn" aria-label="Select Persona" title="Select Persona">
+              <i data-lucide="plus"></i>
+            </button>
+
+            <div class="persona-dropdown" id="personaDropdown">
+              <div class="dropdown-header">Select Persona</div>
+              <button class="dropdown-item active" type="button" data-persona="general">
+                <i data-lucide="sparkles"></i>
+                <div class="item-text">
+                  <div class="item-title">General Assistant</div>
+                  <div class="item-desc">Versatile and helpful AI assistant</div>
+                </div>
+              </button>
+              <button class="dropdown-item" type="button" data-persona="teacher">
+                <i data-lucide="graduation-cap"></i>
+                <div class="item-text">
+                  <div class="item-title">Teacher</div>
+                  <div class="item-desc">Explains concepts step-by-step</div>
+                </div>
+              </button>
+              <button class="dropdown-item" type="button" data-persona="coder">
+                <i data-lucide="code-2"></i>
+                <div class="item-text">
+                  <div class="item-title">Coding Expert</div>
+                  <div class="item-desc">Writes and optimizes source code</div>
+                </div>
+              </button>
+            </div>
+
+            <textarea id="userInput" rows="1" placeholder="Ask anything..."></textarea>
+            <button type="submit" class="send-btn" aria-label="Send" title="Send Message">
+              <i data-lucide="send"></i>
+            </button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <script>
+      const chatLog = document.getElementById('chatLog'), userInput = document.getElementById('userInput'), chatForm = document.getElementById('chatForm'), messageCount = document.getElementById('messageCount'), searchChats = document.getElementById('searchChats'), personaDropdown = document.getElementById('personaDropdown');
+      const state = { messages: [], history: [], currentThreadId: null, pinnedThreads: [], currentPersona: 'general' };
+
+      const originalFetch = window.fetch;
+      window.fetch = (input, init) => {
+        if (typeof input === 'string' && input.startsWith('/api/')) {
+          if (window.location.protocol === 'file:' || (window.location.port && window.location.port !== '5000')) {
+            input = `http://127.0.0.1:5000${input}`;
+          }
+        }
+        return originalFetch(input, init);
+      };
+
+      const escapeHtml = text => { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; };
+      const renderIcons = () => window.lucide?.createIcons?.();
+      const updateMessageCount = () => messageCount.textContent = `${state.messages.length} messages`;
+      const likeMessage = () => alert('Thanks for the feedback!');
+
+      function setPersona(p) {
+        state.currentPersona = p || 'general';
+        document.querySelectorAll('.dropdown-item').forEach(btn => btn.classList.toggle('active', btn.dataset.persona === state.currentPersona));
+      }
+
+      async function loadChatsFromDB() {
+        try {
+          const res = await fetch('/api/chats');
+          state.history = await res.json();
+          state.pinnedThreads = state.history.filter(c => c.pinned).map(c => c.id);
+          renderChatList();
+        } catch (err) { console.error('Error loading chats:', err); }
+      }
+
+      function createThread() {
+        state.currentThreadId = Date.now().toString();
+        state.messages = [];
+        renderChatLog();
+        updateMessageCount();
+        renderChatList();
+      }
+
+      async function saveHistory() {
+        if (!state.currentThreadId || !state.messages.length) return;
+        try {
+          const res = await fetch('/api/chat/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: state.currentThreadId,
+              title: state.messages[0]?.text?.slice(0, 30) || 'New conversation',
+              messages: state.messages,
+              pinned: state.pinnedThreads.includes(state.currentThreadId) ? 1 : 0,
+              persona: state.currentPersona
+            })
+          });
+          if (res.ok) await loadChatsFromDB();
+        } catch (err) { console.error('Error saving chat:', err); }
+      }
+
+      function togglePin(id) {
+        const pin = !state.pinnedThreads.includes(id);
+        state.pinnedThreads = pin ? [...state.pinnedThreads, id] : state.pinnedThreads.filter(tid => tid !== id);
+        fetch(`/api/chat/pin/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pinned: pin ? 1 : 0 })
+        }).then(loadChatsFromDB);
+      }
+
+      function deleteChat(id) {
+        fetch(`/api/chat/delete/${id}`, { method: 'DELETE' }).then(() => {
+          state.history = state.history.filter(c => c.id !== id);
+          state.pinnedThreads = state.pinnedThreads.filter(tid => tid !== id);
+          if (state.currentThreadId === id) createThread(); else renderChatList();
+          loadChatsFromDB();
+        });
+      }
+
+      const isThisWeek = date => date && (Date.now() - new Date(date.replace(' ', 'T') + 'Z').getTime() < 7 * 24 * 60 * 60 * 1000);
+
+      function renderChatItem(item) {
+        const pinned = state.pinnedThreads.includes(item.id);
+        const active = state.currentThreadId === item.id;
+        const preview = item.messages[item.messages.length - 1]?.text?.slice(0, 40) || 'No messages';
+        return `
+          <div class="chat-item ${active ? 'active' : ''}" data-id="${item.id}">
+            <div class="chat-item-content">
+              <div class="chat-item-title">${escapeHtml(item.title)}</div>
+              <div class="chat-item-preview">${escapeHtml(preview)}</div>
+            </div>
+            <div class="chat-item-actions">
+              <button class="action-icon pin-btn" type="button" title="${pinned ? 'Unpin' : 'Pin'}" onclick="togglePin('${item.id}')">
+                <i data-lucide="pin" class="${pinned ? 'pin-active' : ''}"></i>
+              </button>
+              <button class="action-icon delete-btn" type="button" title="Delete" onclick="deleteChat('${item.id}')">
+                <i data-lucide="trash-2"></i>
+              </button>
+            </div>
+          </div>`;
+      }
+
+      function renderChatList() {
+        const pin = state.history.filter(c => state.pinnedThreads.includes(c.id));
+        const week = state.history.filter(c => !state.pinnedThreads.includes(c.id) && isThisWeek(c.updated_at));
+        const old = state.history.filter(c => !state.pinnedThreads.includes(c.id) && !isThisWeek(c.updated_at));
+        const show = (listId, list, sectId) => {
+          document.getElementById(listId).innerHTML = list.map(renderChatItem).join('');
+          document.getElementById(sectId).style.display = list.length ? 'block' : 'none';
+        };
+        show('pinnedList', pin, 'pinnedSection');
+        show('thisWeekList', week, 'thisWeekSection');
+        show('olderList', old, 'olderSection');
+        renderIcons();
+      }
+
+      function renderChatLog() {
+        const isEmpty = !state.messages.length;
+        document.querySelector('.chat-panel').classList.toggle('empty-chat', isEmpty);
+        if (isEmpty) {
+          chatLog.innerHTML = `<div class="welcome-card"><div class="welcome-icon"><i data-lucide="message-square"></i></div><h3>Welcome! &#128075;</h3><p>Where ideas become conversations.</p></div>`;
+        } else {
+          chatLog.innerHTML = state.messages.map((m, idx) => `
+            <div class="message-group ${m.role}">
+              <div class="message-avatar">${m.role === 'user' ? '<i data-lucide="user"></i>' : '<i data-lucide="bot"></i>'}</div>
+              <div class="message-content">
+                <div class="message-bubble">${escapeHtml(m.text)}</div>
+                ${m.role === 'bot' ? `
+                  <div class="message-actions">
+                    <button class="message-action-btn copy-btn" type="button" onclick="copyMessage(${idx})"><i data-lucide="copy" class="action-btn-icon"></i> Copy</button>
+                    <button class="message-action-btn like-btn" type="button" onclick="likeMessage(${idx})"><i data-lucide="thumbs-up" class="action-btn-icon"></i> Like</button>
+                  </div>` : ''}
+              </div>
+            </div>`).join('');
+        }
+        renderIcons();
+        chatLog.scrollTop = chatLog.scrollHeight;
+      }
+
+      const copyMessage = idx => { navigator.clipboard.writeText(state.messages[idx].text); alert('Copied to clipboard.'); };
+
+      function appendMessage(role, text) {
+        state.messages.push({ role, text });
+        renderChatLog();
+        updateMessageCount();
+        saveHistory();
+      }
+
+      async function sendMessage() {
+        const msg = userInput.value.trim();
+        if (!msg) return;
+        if (!state.currentThreadId) createThread();
+        appendMessage('user', msg);
+        userInput.value = '';
+        userInput.style.height = 'auto';
+
+        const loadDiv = document.createElement('div');
+        loadDiv.className = 'message-group bot loading';
+        loadDiv.innerHTML = `<div class="message-avatar"><i data-lucide="bot"></i></div><div class="message-content"><div class="message-bubble typing"><span></span><span></span><span></span></div></div>`;
+        chatLog.appendChild(loadDiv);
+        renderIcons();
+        chatLog.scrollTop = chatLog.scrollHeight;
+
+        try {
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: msg, messages: state.messages, persona: state.currentPersona })
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Server error.');
+          if (!res.body) throw new Error('Server returned an empty response.');
+          loadDiv.remove();
+
+          const botIdx = state.messages.length;
+          state.messages.push({ role: 'bot', text: '' });
+          renderChatLog();
+
+          const bubbles = chatLog.querySelectorAll('.message-bubble'), target = bubbles[bubbles.length - 1];
+          const reader = res.body.getReader(), decoder = new TextDecoder('utf-8');
+          let buf = '', done = false;
+
+          let displayedText = '';
+          const chunkQueue = [];
+          let isTyping = false;
+          let doneStreaming = false;
+
+          function startTypingLoop() {
+            if (isTyping) return;
+            isTyping = true;
+            
+            function tick() {
+              if (chunkQueue.length > 0) {
+                // If queue is building up, type faster or consume more chunks
+                let chunksToProcess = 1;
+                let delay = 45; // normal speed: 45ms per chunk/token
+                
+                if (chunkQueue.length > 15) {
+                  chunksToProcess = 3;
+                  delay = 10;
+                } else if (chunkQueue.length > 5) {
+                  chunksToProcess = 2;
+                  delay = 20;
+                }
+                
+                for (let i = 0; i < chunksToProcess && chunkQueue.length > 0; i++) {
+                  displayedText += chunkQueue.shift();
+                }
+                
+                state.messages[botIdx].text = displayedText;
+                target.innerHTML = escapeHtml(displayedText);
+                chatLog.scrollTop = chatLog.scrollHeight;
+                setTimeout(tick, delay);
+              } else if (doneStreaming) {
+                isTyping = false;
+                state.messages[botIdx].text = displayedText;
+                updateMessageCount();
+                saveHistory();
+              } else {
+                // Queue is empty, but stream is still active. Wait for next chunks.
+                setTimeout(tick, 30);
+              }
+            }
+            tick();
+          }
+
+          startTypingLoop();
+
+          try {
+            while (!done) {
+              const { value, done: rDone } = await reader.read();
+              done = rDone;
+              buf += decoder.decode(value || new Uint8Array(), { stream: !done });
+              const lines = buf.split('\n');
+              buf = lines.pop() || '';
+              for (const line of lines) {
+                const clean = line.trim();
+                if (clean.startsWith('data: ')) {
+                  const data = clean.slice(6).trim();
+                  if (data === '[DONE]') { done = true; break; }
+                  try {
+                    const content = JSON.parse(data).choices?.[0]?.delta?.content || '';
+                    if (content) {
+                      chunkQueue.push(content);
+                    }
+                  } catch(e) {}
+                }
+              }
+            }
+          } finally {
+            doneStreaming = true;
+          }
+        } catch (err) {
+          loadDiv.remove();
+          appendMessage('bot', err.message || 'Connection error. Please try again.');
+        }
+      }
+
+      chatForm.addEventListener('submit', e => { e.preventDefault(); sendMessage(); });
+      userInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+      userInput.addEventListener('input', () => { userInput.style.height = 'auto'; userInput.style.height = `${Math.min(userInput.scrollHeight, 120)}px`; });
+      searchChats.addEventListener('input', () => {
+        const q = searchChats.value.toLowerCase();
+        document.querySelectorAll('.chat-item').forEach(item => {
+          item.style.display = item.querySelector('.chat-item-title').textContent.toLowerCase().includes(q) ? 'flex' : 'none';
+        });
+      });
+      document.getElementById('newChatBtn').addEventListener('click', createThread);
+      document.querySelector('.chat-list-container').addEventListener('click', e => {
+        const content = e.target.closest('.chat-item-content');
+        if (!content) return;
+        const selected = state.history.find(c => c.id === content.closest('.chat-item').dataset.id);
+        if (!selected) return;
+        state.currentThreadId = selected.id;
+        state.messages = selected.messages || [];
+        setPersona(selected.persona || 'general');
+        renderChatLog();
+        updateMessageCount();
+        renderChatList();
+      });
+
+      const themeIcon = document.getElementById('themeIcon');
+      const setTheme = theme => {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+        if (themeIcon) { themeIcon.setAttribute('data-lucide', theme === 'dark' ? 'moon' : 'sun'); renderIcons(); }
+      };
+      setTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+      document.querySelector('.theme-toggle').addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+
+      document.getElementById('personaToggleBtn').addEventListener('click', e => { e.stopPropagation(); personaDropdown.classList.toggle('show'); });
+      document.addEventListener('click', e => { if (!e.target.closest('.input-container')) personaDropdown.classList.remove('show'); });
+      document.querySelectorAll('.dropdown-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          setPersona(btn.dataset.persona);
+          personaDropdown.classList.remove('show');
+          if (state.currentThreadId && state.messages.length) saveHistory();
+        });
+      });
+
+      window.togglePin = togglePin;
+      window.deleteChat = deleteChat;
+      window.copyMessage = copyMessage;
+      window.likeMessage = likeMessage;
+
+      createThread();
+      loadChatsFromDB();
+    </script>
+  </body>
+</html>
