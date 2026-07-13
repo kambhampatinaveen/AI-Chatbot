@@ -156,5 +156,3 @@ No additional database configuration is required.
 ## 📄 License
 
 This project is created for learning and educational purposes.
-
-GitHub: https://github.com/kambhampatinaveen
