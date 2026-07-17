@@ -3,14 +3,10 @@ import sqlite3
 import requests
 from datetime import datetime
 from pathlib import Path
-from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, Response
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "chatbot.db"
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 app = Flask(__name__, static_folder=str(BASE_DIR))
 
@@ -160,14 +156,12 @@ def chat():
     message = (payload.get("message") or "").strip()
     if not message:
         return jsonify({"error": "Please enter a message."}), 400
-    if not GROQ_API_KEY:
-        return jsonify({"error": "GROQ_API_KEY is not configured."}), 500
 
     try:
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
                 "Content-Type": "application/json",
             },
             json={
